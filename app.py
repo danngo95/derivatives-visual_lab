@@ -15,6 +15,7 @@ st.set_page_config(
 )
 
 st.title("Payoff Lab")
+st.caption("Visualizador introductorio de payoffs de derivados")
 
 
 # =========================================================
@@ -239,28 +240,17 @@ def load_template(name, spot):
     return []
 
 
-def template_explanation(name):
-    d = {
-        "Long Call": "Ganas si el precio final sube por arriba del strike. La pérdida máxima es la prima pagada.",
-        "Long Put": "Ganas si el precio final cae por debajo del strike. La pérdida máxima es la prima pagada.",
-        "Long Forward": "El payoff es lineal. Ganas si el precio final termina arriba del precio forward.",
-        "Protective Put": "Combina activo + put comprado. Sirve para limitar la pérdida a la baja.",
-        "Covered Call": "Combina activo + call vendido. Cobras una prima pero limitas parte de la ganancia al alza.",
-        "Bull Call Spread": "Apuesta alcista con ganancia y pérdida acotadas.",
-        "Bear Put Spread": "Apuesta bajista con ganancia y pérdida acotadas.",
-        "Long Straddle": "Apuesta a movimientos grandes en cualquier dirección.",
-    }
-    return d.get(name, "")
-
-
 # =========================================================
 # STATE
 # =========================================================
 if "legs" not in st.session_state:
     st.session_state.legs = []
 
-if "chart_period" not in st.session_state:
-    st.session_state.chart_period = "6mo"
+if "last_ticker" not in st.session_state:
+    st.session_state.last_ticker = None
+
+if "last_period" not in st.session_state:
+    st.session_state.last_period = None
 
 
 # =========================================================
@@ -292,6 +282,24 @@ if manual_spot:
     spot = st.sidebar.number_input("Spot manual", min_value=0.0, value=float(round(spot_mkt, 4)), step=0.1)
 else:
     spot = float(round(spot_mkt, 4))
+
+# FIX PRINCIPAL:
+# si cambia el ticker, se vacía la estrategia para no mezclar legs viejas
+# con el nuevo subyacente
+if st.session_state.last_ticker is None:
+    st.session_state.last_ticker = ticker
+
+if st.session_state.last_ticker != ticker:
+    st.session_state.legs = []
+    st.session_state.last_ticker = ticker
+    st.rerun()
+
+# si cambia el horizonte del histórico, solo actualizamos el registro
+if st.session_state.last_period is None:
+    st.session_state.last_period = period
+
+if st.session_state.last_period != period:
+    st.session_state.last_period = period
 
 refresh = st.sidebar.button("Actualizar datos", use_container_width=True)
 if refresh:
@@ -349,7 +357,6 @@ if hist is not None:
         hovermode="x unified",
     )
     st.plotly_chart(fig_hist, use_container_width=True)
-
 
 st.markdown("---")
 
@@ -678,9 +685,11 @@ with right:
             use_container_width=True,
         )
 
-st.markdown("---")
-st.subheader("Cómo usarla en clase")
 
+# =========================================================
+# TEACHING NOTES
+# =========================================================
+st.markdown("---")
 
 st.write(
     """
