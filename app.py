@@ -579,27 +579,6 @@ with left:
         show_legs = st.checkbox("Mostrar patas individuales", value=True)
         show_break_evens = st.checkbox("Mostrar break-even(s)", value=True)
 
-    S_temp, smin_temp, smax_temp = build_price_grid(spot, low_pct, high_pct, n=501)
-    reset_ST_if_needed(smin_temp, smax_temp, spot)
-
-    if len(st.session_state.legs) > 0:
-        step_temp = max((smax_temp - smin_temp) / 200.0, 0.01)
-
-        ST = st.slider(
-            "Precio final al vencimiento (S_T)",
-            min_value=float(round(smin_temp, 4)),
-            max_value=float(round(smax_temp, 4)),
-            value=float(round(st.session_state.ST_eval, 4)),
-            step=float(step_temp),
-            key=f"st_slider_{ticker}_{period}_{low_pct}_{high_pct}_{round(spot, 4)}",
-        )
-
-        st.session_state.ST_eval = float(ST)
-
-        st.caption(
-            "Mueve este slider para ver qué pasa con cada instrumento y con la estrategia total."
-        )
-
     colx, coly = st.columns(2)
 
     with colx:
@@ -630,7 +609,22 @@ with right:
     else:
         S, s_min, s_max = build_price_grid(spot, low_pct, high_pct, n=1201)
         reset_ST_if_needed(s_min, s_max, spot)
-        ST = float(st.session_state.ST_eval)
+
+        step_temp = max((s_max - s_min) / 200.0, 0.01)
+
+        ST = st.slider(
+            "Precio final al vencimiento (S_T)",
+            min_value=float(round(s_min, 4)),
+            max_value=float(round(s_max, 4)),
+            value=float(round(st.session_state.ST_eval, 4)),
+            step=float(step_temp),
+        )
+
+        st.session_state.ST_eval = float(ST)
+
+        st.caption(
+            "Mueve el slider y observa cómo cambia el payoff de la estrategia."
+        )
 
         total_payoff, total_pnl, leg_payoffs, leg_pnls = portfolio_payoff(S, st.session_state.legs)
         be_list = find_break_evens(S, total_pnl)
