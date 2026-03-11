@@ -79,11 +79,10 @@ def payoff_single(S, instrument, side, K, qty=1.0):
     elif instrument == "Stock":
         raw = S
     else:
-        raw = np.zeros_like(S)
+        raw = np.zeros_like(S, dtype=float)
 
     sign = 1.0 if side == "Long" else -1.0
-    payoff = sign * raw * qty
-    return payoff
+    return sign * raw * qty
 
 
 def portfolio_payoff(S, legs):
@@ -104,7 +103,7 @@ def portfolio_payoff(S, legs):
     return total_payoff, leg_payoffs
 
 
-def build_price_grid_from_view(spot, view_mode="Medio", n=601):
+def build_price_grid_from_view(spot, view_mode="Medio", n=801):
     mapping = {
         "Corto": 0.20,
         "Medio": 0.40,
@@ -176,13 +175,13 @@ def reset_st_slider_to_spot(spot):
     st.session_state.ST_eval = float(round(spot, 4))
 
 
-def payoff_at_ST(ST, legs):
+def build_payoff_rows(ST, legs):
     rows = []
     total_payoff = 0.0
 
     for i, leg in enumerate(legs, start=1):
         payoff_i = payoff_single(
-            S=np.array([ST]),
+            S=np.array([ST], dtype=float),
             instrument=leg["instrument"],
             side=leg["side"],
             K=float(leg["K"]),
@@ -196,14 +195,13 @@ def payoff_at_ST(ST, legs):
                 "Leg": i,
                 "Instrument": leg["instrument"],
                 "Side": leg["side"],
-                "Strike/Fwd": leg["K"],
-                "T (años)": leg["T"],
-                "# contratos": leg["qty"],
+                "Strike/Fwd": float(leg["K"]),
+                "# contratos": float(leg["qty"]),
                 "Payoff@S_T": payoff_i,
             }
         )
 
-    return pd.DataFrame(rows), total_payoff
+    return rows, total_payoff
 
 
 # =========================================================
@@ -285,22 +283,31 @@ if st.session_state.last_period is None:
 if st.session_state.last_spot is None:
     st.session_state.last_spot = float(spot)
 
-if st.session_state.last_ticker != ticker:
+ticker_changed = st.session_state.last_ticker != ticker
+period_changed = st.session_state.last_period != period
+spot_changed = abs(float(st.session_state.last_spot) - float(spot)) > 1e-12
+
+if ticker_changed:
     st.session_state.legs = []
     st.session_state.last_ticker = ticker
     st.session_state.last_spot = float(spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
-if st.session_state.last_period != period:
+if period_changed:
     st.session_state.last_period = period
     st.session_state.last_spot = float(spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
-if abs(float(st.session_state.last_spot) - float(spot)) > 1e-12:
+if spot_changed:
     st.session_state.last_spot = float(spot)
     reset_st_slider_to_spot(spot)
+
+if st.session_state.last_ticker is None:
+    st.session_state.last_ticker = ticker
+if st.session_state.last_period is None:
+    st.session_state.last_period = period
 
 
 # =========================================================
@@ -365,7 +372,7 @@ if t8.button("Synth Fwd", use_container_width=True):
 # =========================================================
 # MAIN LAYOUT
 # =========================================================
-left, right = st.columns([1.0, 2.2])
+left, right = st.columns([0.95, 2.35])
 
 
 # =========================================================
@@ -396,13 +403,6 @@ with left:
                 step=1.0,
             )
 
-            days_form = st.number_input(
-                "Vencimiento (días)",
-                min_value=1,
-                value=int(default_days),
-                step=1,
-            )
-
             qty_form = st.number_input(
                 "# contratos",
                 min_value=0.0,
@@ -413,13 +413,12 @@ with left:
             add_leg = st.form_submit_button("Agregar", use_container_width=True)
 
         if add_leg:
-            T_form = float(days_form) / 365.0
             st.session_state.legs.append(
                 {
                     "instrument": instrument,
                     "side": side,
                     "K": float(K_form),
-                    "T": float(T_form),
+                    "T": float(T_base),
                     "qty": float(qty_form),
                 }
             )
@@ -432,57 +431,13 @@ with left:
             index=1,
             horizontal=True,
         )
-        st.caption("Controla qué tan lejos del spot quieres ver el payoff.")
-
         show_total_payoff = st.checkbox("Mostrar payoff total", value=True)
         show_legs = st.checkbox("Mostrar patas individuales", value=False)
 
-    a, b = st.columns(2)
-
-    with a:
-        if st.button("Vaciar estrategia", use_container_width=True):
-            st.session_state.legs = []
-            reset_st_slider_to_spot(spot)
-            st.rerun()
-
-    with b:
-        if len(st.session_state.legs) > 0:
-            remove_idx = st.selectbox(
-                "Borrar leg",
-                options=list(range(1, len(st.session_state.legs) + 1)),
-                format_func=lambda x: f"Leg {x}",
-                key="remove_leg_selector",
-            )
-            if st.button("Borrar seleccionada", use_container_width=True):
-                st.session_state.legs.pop(remove_idx - 1)
-                st.rerun()
-
-    if len(st.session_state.legs) > 0:
-        st.subheader("Patas actuales")
-        current_legs_df = pd.DataFrame(
-            [
-                {
-                    "Leg": i + 1,
-                    "Instrument": leg["instrument"],
-                    "Side": leg["side"],
-                    "Strike/Fwd": leg["K"],
-                    "T (años)": leg["T"],
-                    "# contratos": leg["qty"],
-                }
-                for i, leg in enumerate(st.session_state.legs)
-            ]
-        )
-
-        st.dataframe(
-            current_legs_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Strike/Fwd": st.column_config.NumberColumn(format="%.2f"),
-                "T (años)": st.column_config.NumberColumn(format="%.3f"),
-                "# contratos": st.column_config.NumberColumn(format="%.2f"),
-            },
-        )
+    if st.button("Vaciar estrategia", use_container_width=True):
+        st.session_state.legs = []
+        reset_st_slider_to_spot(spot)
+        st.rerun()
 
 
 # =========================================================
@@ -492,7 +447,7 @@ with right:
     if len(st.session_state.legs) == 0:
         st.info("Agrega instrumentos o usa una estrategia rápida.")
     else:
-        S, s_min, s_max = build_price_grid_from_view(spot, view_mode, n=601)
+        S, s_min, s_max = build_price_grid_from_view(spot, view_mode, n=801)
         s_min = float(round(s_min, 4))
         s_max = float(round(s_max, 4))
 
@@ -510,6 +465,20 @@ with right:
 
         total_payoff, leg_payoffs = portfolio_payoff(S, st.session_state.legs)
 
+        ST = st.slider(
+            "Precio final al vencimiento (S_T)",
+            min_value=s_min,
+            max_value=s_max,
+            step=float(step_temp),
+            key="ST_eval",
+            format="%.4f",
+        )
+        ST = float(ST)
+
+        rows, total_payoff_ST = build_payoff_rows(ST, st.session_state.legs)
+        max_payoff = float(np.max(total_payoff))
+        min_payoff = float(np.min(total_payoff))
+
         fig = go.Figure()
 
         if show_legs:
@@ -522,7 +491,7 @@ with right:
                         mode="lines",
                         name=base_name,
                         line=dict(width=1.5, dash="dot"),
-                        opacity=0.50,
+                        opacity=0.45,
                         hovertemplate="S=%{x:,.2f}<br>Payoff=%{y:,.2f}<extra></extra>",
                     )
                 )
@@ -540,13 +509,23 @@ with right:
             )
 
         fig.add_hline(y=0, line_dash="dash", line_width=1)
-        fig.add_vline(x=spot, line_dash="dot", line_width=1.3)
+        fig.add_vline(x=spot, line_dash="dot", line_width=1.2)
+        fig.add_vline(x=ST, line_width=2)
 
         fig.add_annotation(
             x=spot,
             y=1.0,
             yref="paper",
             text=f"Spot = {spot:,.2f}",
+            showarrow=False,
+            xanchor="left",
+        )
+
+        fig.add_annotation(
+            x=ST,
+            y=1.0,
+            yref="paper",
+            text=f"S_T = {ST:,.2f}",
             showarrow=False,
             xanchor="left",
         )
@@ -598,39 +577,46 @@ with right:
 
         st.plotly_chart(fig, use_container_width=True, key="payoff_chart")
 
-        ST = st.slider(
-            "Precio final al vencimiento (S_T)",
-            min_value=s_min,
-            max_value=s_max,
-            step=float(step_temp),
-            key="ST_eval",
-            format="%.4f",
-        )
-        ST = float(ST)
-
-        detail_df, total_payoff_ST = payoff_at_ST(ST, st.session_state.legs)
-        max_payoff = float(np.max(total_payoff))
-        min_payoff = float(np.min(total_payoff))
-
-        r1, r2, r3 = st.columns(3)
-        r1.metric("Payoff total @ S_T", f"{total_payoff_ST:,.2f}")
-        r2.metric("Máx payoff en vista", f"{max_payoff:,.2f}")
-        r3.metric("Mín payoff en vista", f"{min_payoff:,.2f}")
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Payoff total @ S_T", f"{total_payoff_ST:,.2f}")
+        k2.metric("Máx payoff en vista", f"{max_payoff:,.2f}")
+        k3.metric("Mín payoff en vista", f"{min_payoff:,.2f}")
 
         st.subheader("Qué pasa en ese precio final")
         st.write(f"Evaluación actual en **S_T = {ST:,.4f}**.")
 
-        st.dataframe(
-            detail_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Strike/Fwd": st.column_config.NumberColumn(format="%.2f"),
-                "T (años)": st.column_config.NumberColumn(format="%.3f"),
-                "# contratos": st.column_config.NumberColumn(format="%.2f"),
-                "Payoff@S_T": st.column_config.NumberColumn(format="%.2f"),
-            },
-        )
+        hdr = st.columns([0.8, 1.4, 1.0, 1.2, 1.0, 1.3, 0.7])
+        hdr[0].markdown("**Leg**")
+        hdr[1].markdown("**Instrument**")
+        hdr[2].markdown("**Side**")
+        hdr[3].markdown("**Strike/Fwd**")
+        hdr[4].markdown("**Qty**")
+        hdr[5].markdown("**Payoff@S_T**")
+        hdr[6].markdown("**Quitar**")
+
+        st.markdown("---")
+
+        delete_idx = None
+        for i, row in enumerate(rows):
+            c = st.columns([0.8, 1.4, 1.0, 1.2, 1.0, 1.3, 0.7])
+            c[0].write(int(row["Leg"]))
+            c[1].write(str(row["Instrument"]))
+            c[2].write(str(row["Side"]))
+            c[3].write(f'{row["Strike/Fwd"]:,.2f}')
+            c[4].write(f'{row["# contratos"]:,.2f}')
+            c[5].write(f'{row["Payoff@S_T"]:,.2f}')
+            if c[6].button("✕", key=f"delete_leg_{i}", use_container_width=True):
+                delete_idx = i
+
+        st.markdown("---")
+
+        total_cols = st.columns([0.8, 1.4, 1.0, 1.2, 1.0, 1.3, 0.7])
+        total_cols[0].markdown("**TOTAL**")
+        total_cols[5].markdown(f"**{total_payoff_ST:,.2f}**")
+
+        if delete_idx is not None:
+            st.session_state.legs.pop(delete_idx)
+            st.rerun()
 
 
 # =========================================================
@@ -644,6 +630,6 @@ st.write(
 - **Put**: \(\max(K-S_T,0)\)
 - **Forward**: \(S_T-K\)
 - **Stock**: \(S_T\)
-- **Short** significa cambiar el signo del payoff.
+- **Short** cambia el signo del payoff.
 """
 )
