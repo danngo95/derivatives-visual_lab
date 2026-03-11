@@ -113,9 +113,9 @@ def portfolio_payoff(S, legs):
     return total_payoff, total_pnl, leg_payoffs, leg_pnls
 
 
-def build_price_grid(spot, low_pct=40, high_pct=40, n=601):
-    s_min = max(0.0, spot * (1 - low_pct / 100.0))
-    s_max = max(s_min + 1e-8, spot * (1 + high_pct / 100.0))
+def build_price_grid_symmetric(spot, zoom_pct=40, n=601):
+    s_min = max(0.0, spot * (1 - zoom_pct / 100.0))
+    s_max = max(s_min + 1e-8, spot * (1 + zoom_pct / 100.0))
     return np.linspace(s_min, s_max, n), s_min, s_max
 
 
@@ -698,12 +698,11 @@ with left:
             st.rerun()
 
     with st.expander("Controles visuales", expanded=True):
-        low_pct = st.slider("Rango abajo (%)", 0, 95, 40, 5)
-        high_pct = st.slider("Rango arriba (%)", 0, 250, 40, 5)
-
+        zoom_pct = st.slider("Zoom del eje X (%) alrededor del spot", 10, 200, 40, 5)
+    
         show_total_payoff = st.checkbox("Mostrar total payoff", value=True)
         show_total_pnl = st.checkbox("Mostrar total P&L", value=True)
-        show_legs = st.checkbox("Mostrar patas individuales", value=True)
+        show_legs = st.checkbox("Mostrar patas individuales", value=False)
         show_break_evens = st.checkbox("Mostrar break-even(s)", value=True)
 
     colx, coly = st.columns(2)
@@ -734,7 +733,7 @@ with right:
     if len(st.session_state.legs) == 0:
         st.info("Agrega instrumentos o usa los botones de estrategias rápidas.")
     else:
-        S, s_min, s_max = build_price_grid(spot, low_pct, high_pct, n=601)
+        S, s_min, s_max = build_price_grid_symmetric(spot, zoom_pct, n=601)
 
         s_min = float(round(s_min, 4))
         s_max = float(round(s_max, 4))
