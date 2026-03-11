@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -20,14 +19,14 @@ st.caption("Visualizador introductorio de payoffs al vencimiento")
 
 
 # =========================================================
-# DATA HELPERS
+# DATA
 # =========================================================
 @st.cache_data(ttl=300, show_spinner=False)
-def get_market_data(ticker: str, period: str = "6mo"):
+def get_spot_data(ticker: str):
     try:
         data = yf.download(
             ticker,
-            period=period,
+            period="3mo",
             interval="1d",
             auto_adjust=False,
             progress=False,
@@ -35,7 +34,7 @@ def get_market_data(ticker: str, period: str = "6mo"):
         )
 
         if data is None or data.empty:
-            return None, None, None, None
+            return None, None, None
 
         if isinstance(data.columns, pd.MultiIndex):
             if ("Close", ticker) in data.columns:
@@ -46,29 +45,22 @@ def get_market_data(ticker: str, period: str = "6mo"):
             close = data["Close"].dropna()
 
         if close.empty:
-            return None, None, None, None
+            return None, None, None
 
         spot = float(close.iloc[-1])
         prev = float(close.iloc[-2]) if len(close) >= 2 else spot
         chg = spot - prev
         chg_pct = (chg / prev * 100.0) if prev != 0 else 0.0
 
-        hist = close.reset_index()
-        hist.columns = ["Date", "Close"]
-
-        return spot, chg, chg_pct, hist
+        return spot, chg, chg_pct
 
     except Exception:
-        return None, None, None, None
+        return None, None, None
 
 
 # =========================================================
 # PAYOFF HELPERS
 # =========================================================
-def forward_price_no_dividends(S: float, r: float, T: float) -> float:
-    return S * math.exp(r * T)
-
-
 def payoff_single(S, instrument, side, K, qty=1.0):
     if instrument == "Call":
         raw = np.maximum(S - K, 0.0)
@@ -120,53 +112,51 @@ def clamp(x, xmin, xmax):
     return min(max(float(x), float(xmin)), float(xmax))
 
 
-def make_leg(instrument, side, K, T, qty):
+def make_leg(instrument, side, K, qty):
     return {
         "instrument": instrument,
         "side": side,
         "K": float(K),
-        "T": float(T),
         "qty": float(qty),
     }
 
 
-def load_template(name, spot, r, T):
+def load_template(name, spot):
     if name == "Long Call":
-        return [make_leg("Call", "Long", round(spot, 2), T, 1.0)]
+        return [make_leg("Call", "Long", round(spot, 2), 1.0)]
     if name == "Long Put":
-        return [make_leg("Put", "Long", round(spot, 2), T, 1.0)]
+        return [make_leg("Put", "Long", round(spot, 2), 1.0)]
     if name == "Long Forward":
-        fwd = forward_price_no_dividends(spot, r, T)
-        return [make_leg("Forward", "Long", round(fwd, 2), T, 1.0)]
+        return [make_leg("Forward", "Long", round(spot, 2), 1.0)]
     if name == "Protective Put":
         return [
-            make_leg("Stock", "Long", 0.0, T, 1.0),
-            make_leg("Put", "Long", round(spot, 2), T, 1.0),
+            make_leg("Stock", "Long", 0.0, 1.0),
+            make_leg("Put", "Long", round(spot, 2), 1.0),
         ]
     if name == "Covered Call":
         return [
-            make_leg("Stock", "Long", 0.0, T, 1.0),
-            make_leg("Call", "Short", round(1.05 * spot, 2), T, 1.0),
+            make_leg("Stock", "Long", 0.0, 1.0),
+            make_leg("Call", "Short", round(1.05 * spot, 2), 1.0),
         ]
     if name == "Bull Call Spread":
         return [
-            make_leg("Call", "Long", round(0.95 * spot, 2), T, 1.0),
-            make_leg("Call", "Short", round(1.05 * spot, 2), T, 1.0),
+            make_leg("Call", "Long", round(0.95 * spot, 2), 1.0),
+            make_leg("Call", "Short", round(1.05 * spot, 2), 1.0),
         ]
     if name == "Bear Put Spread":
         return [
-            make_leg("Put", "Long", round(1.05 * spot, 2), T, 1.0),
-            make_leg("Put", "Short", round(0.95 * spot, 2), T, 1.0),
+            make_leg("Put", "Long", round(1.05 * spot, 2), 1.0),
+            make_leg("Put", "Short", round(0.95 * spot, 2), 1.0),
         ]
     if name == "Straddle":
         return [
-            make_leg("Call", "Long", round(spot, 2), T, 1.0),
-            make_leg("Put", "Long", round(spot, 2), T, 1.0),
+            make_leg("Call", "Long", round(spot, 2), 1.0),
+            make_leg("Put", "Long", round(spot, 2), 1.0),
         ]
     if name == "Synthetic Long Forward":
         return [
-            make_leg("Call", "Long", round(spot, 2), T, 1.0),
-            make_leg("Put", "Short", round(spot, 2), T, 1.0),
+            make_leg("Call", "Long", round(spot, 2), 1.0),
+            make_leg("Put", "Short", round(spot, 2), 1.0),
         ]
     return []
 
@@ -213,9 +203,6 @@ if "legs" not in st.session_state:
 if "last_ticker" not in st.session_state:
     st.session_state.last_ticker = None
 
-if "last_period" not in st.session_state:
-    st.session_state.last_period = None
-
 if "last_spot" not in st.session_state:
     st.session_state.last_spot = None
 
@@ -226,7 +213,7 @@ if "ST_eval" not in st.session_state:
 # =========================================================
 # SIDEBAR
 # =========================================================
-st.sidebar.header("Supuestos")
+st.sidebar.header("Subyacente")
 
 ticker = st.sidebar.selectbox(
     "Acción",
@@ -234,11 +221,9 @@ ticker = st.sidebar.selectbox(
     index=0,
 )
 
-period = st.sidebar.selectbox("Ventana histórica", ["3mo", "6mo", "1y"], index=1)
-
 manual_spot = st.sidebar.checkbox("Editar spot manualmente", value=False)
 
-spot_mkt, chg, chg_pct, hist = get_market_data(ticker, period=period)
+spot_mkt, chg, chg_pct = get_spot_data(ticker)
 
 if spot_mkt is None:
     st.sidebar.error("No pude descargar datos.")
@@ -256,18 +241,9 @@ if manual_spot:
 else:
     spot = float(round(spot_mkt, 4))
 
-rate_pct = st.sidebar.slider("Tasa libre de riesgo (%)", 0.0, 15.0, 10.0, 0.25)
-r = rate_pct / 100.0
-
-default_days = st.sidebar.slider("Vencimiento base (días)", 7, 365, 90, 1)
-T_base = default_days / 365.0
-
 if st.sidebar.button("Actualizar datos", use_container_width=True):
     st.cache_data.clear()
     st.rerun()
-
-st.sidebar.markdown("---")
-st.sidebar.caption("Visualizador de payoff al vencimiento.")
 
 
 # =========================================================
@@ -277,14 +253,10 @@ if st.session_state.last_ticker is None:
     st.session_state.last_ticker = ticker
     reset_st_slider_to_spot(spot)
 
-if st.session_state.last_period is None:
-    st.session_state.last_period = period
-
 if st.session_state.last_spot is None:
     st.session_state.last_spot = float(spot)
 
 ticker_changed = st.session_state.last_ticker != ticker
-period_changed = st.session_state.last_period != period
 spot_changed = abs(float(st.session_state.last_spot) - float(spot)) > 1e-12
 
 if ticker_changed:
@@ -294,20 +266,9 @@ if ticker_changed:
     reset_st_slider_to_spot(spot)
     st.rerun()
 
-if period_changed:
-    st.session_state.last_period = period
-    st.session_state.last_spot = float(spot)
-    reset_st_slider_to_spot(spot)
-    st.rerun()
-
 if spot_changed:
     st.session_state.last_spot = float(spot)
     reset_st_slider_to_spot(spot)
-
-if st.session_state.last_ticker is None:
-    st.session_state.last_ticker = ticker
-if st.session_state.last_period is None:
-    st.session_state.last_period = period
 
 
 # =========================================================
@@ -315,8 +276,8 @@ if st.session_state.last_period is None:
 # =========================================================
 m1, m2, m3 = st.columns(3)
 m1.metric("Spot", f"{spot:,.4f}", f"{chg:,.4f} ({chg_pct:,.2f}%)")
-m2.metric("Vencimiento base", f"{default_days} días")
-m3.metric("Ticker", ticker)
+m2.metric("Ticker", ticker)
+m3.metric("# patas", len(st.session_state.legs))
 
 st.markdown("---")
 
@@ -329,48 +290,48 @@ st.subheader("Estrategias rápidas")
 t1, t2, t3, t4, t5, t6, t7, t8 = st.columns(8)
 
 if t1.button("Long Call", use_container_width=True):
-    st.session_state.legs = load_template("Long Call", spot, r, T_base)
+    st.session_state.legs = load_template("Long Call", spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t2.button("Long Put", use_container_width=True):
-    st.session_state.legs = load_template("Long Put", spot, r, T_base)
+    st.session_state.legs = load_template("Long Put", spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t3.button("Forward", use_container_width=True):
-    st.session_state.legs = load_template("Long Forward", spot, r, T_base)
+    st.session_state.legs = load_template("Long Forward", spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t4.button("Protective Put", use_container_width=True):
-    st.session_state.legs = load_template("Protective Put", spot, r, T_base)
+    st.session_state.legs = load_template("Protective Put", spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t5.button("Covered Call", use_container_width=True):
-    st.session_state.legs = load_template("Covered Call", spot, r, T_base)
+    st.session_state.legs = load_template("Covered Call", spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t6.button("Bull Spread", use_container_width=True):
-    st.session_state.legs = load_template("Bull Call Spread", spot, r, T_base)
+    st.session_state.legs = load_template("Bull Call Spread", spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t7.button("Straddle", use_container_width=True):
-    st.session_state.legs = load_template("Straddle", spot, r, T_base)
+    st.session_state.legs = load_template("Straddle", spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t8.button("Synth Fwd", use_container_width=True):
-    st.session_state.legs = load_template("Synthetic Long Forward", spot, r, T_base)
+    st.session_state.legs = load_template("Synthetic Long Forward", spot)
     reset_st_slider_to_spot(spot)
     st.rerun()
 
 
 # =========================================================
-# MAIN LAYOUT
+# LAYOUT
 # =========================================================
 left, right = st.columns([0.95, 2.35])
 
@@ -391,8 +352,6 @@ with left:
 
             if instrument == "Stock":
                 K_default = 0.0
-            elif instrument == "Forward":
-                K_default = round(forward_price_no_dividends(spot, r, T_base), 2)
             else:
                 K_default = round(spot, 2)
 
@@ -418,7 +377,6 @@ with left:
                     "instrument": instrument,
                     "side": side,
                     "K": float(K_form),
-                    "T": float(T_base),
                     "qty": float(qty_form),
                 }
             )
@@ -483,13 +441,12 @@ with right:
 
         if show_legs:
             for i, leg in enumerate(st.session_state.legs):
-                base_name = f"Leg {i+1}: {leg['side']} {leg['instrument']}"
                 fig.add_trace(
                     go.Scatter(
                         x=S,
                         y=leg_payoffs[i],
                         mode="lines",
-                        name=base_name,
+                        name=f"Leg {i+1}: {leg['side']} {leg['instrument']}",
                         line=dict(width=1.5, dash="dot"),
                         opacity=0.45,
                         hovertemplate="S=%{x:,.2f}<br>Payoff=%{y:,.2f}<extra></extra>",
