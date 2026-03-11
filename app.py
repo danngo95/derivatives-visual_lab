@@ -6,7 +6,7 @@ import yfinance as yf
 
 
 # =========================================================
-# PAGE CONFIG
+# CONFIG
 # =========================================================
 st.set_page_config(
     page_title="Payoff Lab",
@@ -21,28 +21,41 @@ st.caption("Visualizador introductorio de payoffs de derivados")
 # =========================================================
 # HELPERS
 # =========================================================
-def get_spot_from_yahoo(ticker: str):
+def get_market_data(ticker: str, period: str = "6mo"):
     try:
-        data = yf.download(ticker, period="10d", interval="1d", auto_adjust=False, progress=False)
+        data = yf.download(
+            ticker,
+            period=period,
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+        )
         if data is None or data.empty:
-            return None, None
-        close_col = "Close"
+            return None, None, None, None
+
         if isinstance(data.columns, pd.MultiIndex):
             if ("Close", ticker) in data.columns:
-                close_series = data[("Close", ticker)]
+                close = data[("Close", ticker)].dropna()
             else:
-                close_series = data.xs("Close", axis=1, level=0).iloc[:, 0]
+                close = data.xs("Close", axis=1, level=0).iloc[:, 0].dropna()
         else:
-            close_series = data[close_col]
-        close_series = close_series.dropna()
-        if close_series.empty:
-            return None, None
-        spot = float(close_series.iloc[-1])
-        hist = close_series.reset_index()
+            close = data["Close"].dropna()
+
+        if close.empty:
+            return None, None, None, None
+
+        spot = float(close.iloc[-1])
+        prev = float(close.iloc[-2]) if len(close) >= 2 else spot
+        chg = spot - prev
+        chg_pct = (chg / prev * 100) if prev != 0 else 0.0
+
+        hist = close.reset_index()
         hist.columns = ["Date", "Close"]
-        return spot, hist
+
+        return spot, chg, chg_pct, hist
+
     except Exception:
-        return None, None
+        return None, None, None, None
 
 
 def payoff_single(S, instrument, side, K, premium, qty=1.0, multiplier=1.0):
@@ -67,8 +80,8 @@ def payoff_single(S, instrument, side, K, premium, qty=1.0, multiplier=1.0):
         pnl = payoff
     else:
         payoff = sign * raw * qty * multiplier
-        premium_cash = premium * qty * multiplier
-        pnl = payoff - premium_cash if side == "Long" else payoff + premium_cash
+        cash = premium * qty * multiplier
+        pnl = payoff - cash if side == "Long" else payoff + cash
 
     return payoff, pnl
 
@@ -76,7 +89,6 @@ def payoff_single(S, instrument, side, K, premium, qty=1.0, multiplier=1.0):
 def portfolio_payoff(S, legs):
     total_payoff = np.zeros_like(S, dtype=float)
     total_pnl = np.zeros_like(S, dtype=float)
-
     leg_payoffs = []
     leg_pnls = []
 
@@ -98,25 +110,82 @@ def portfolio_payoff(S, legs):
     return total_payoff, total_pnl, leg_payoffs, leg_pnls
 
 
-def build_price_grid(spot, low_pct=50, high_pct=50, n=801):
+def build_price_grid(spot, low_pct=40, high_pct=40, n=1001):
     s_min = max(0.0, spot * (1 - low_pct / 100))
-    s_max = max(s_min + 1e-6, spot * (1 + high_pct / 100))
+    s_max = max(s_min + 1e-8, spot * (1 + high_pct / 100))
     return np.linspace(s_min, s_max, n), s_min, s_max
 
 
-def find_break_evens(S, pnl, tol=1e-8):
+def net_initial_cost(legs):
+    total = 0.0
+    for leg in legs:
+        inst = leg["instrument"]
+        side = leg["side"]
+        premium = float(leg["premium"])
+        qty = float(leg["qty"])
+        mult = float(leg["multiplier"])
+
+        if inst == "Forward":
+            cash = 0.0
+        else:
+            cash = premium * qty * mult
+
+        total += cash if side == "Long" else -cash
+    return total
+
+
+def payoff_pnl_at_ST(ST, legs):
+    rows = []
+    total_payoff = 0.0
+    total_pnl = 0.0
+
+    for i, leg in enumerate(legs, start=1):
+        payoff_i, pnl_i = payoff_single(
+            S=np.array([ST]),
+            instrument=leg["instrument"],
+            side=leg["side"],
+            K=float(leg["K"]),
+            premium=float(leg["premium"]),
+            qty=float(leg["qty"]),
+            multiplier=float(leg["multiplier"]),
+        )
+
+        payoff_i = float(payoff_i[0])
+        pnl_i = float(pnl_i[0])
+
+        total_payoff += payoff_i
+        total_pnl += pnl_i
+
+        rows.append(
+            {
+                "Leg": i,
+                "Instrument": leg["instrument"],
+                "Side": leg["side"],
+                "K": leg["K"],
+                "Premium": leg["premium"],
+                "Qty": leg["qty"],
+                "Multiplier": leg["multiplier"],
+                "Payoff@ST": payoff_i,
+                "PnL@ST": pnl_i,
+            }
+        )
+
+    return pd.DataFrame(rows), total_payoff, total_pnl
+
+
+def find_break_evens(S, pnl, tol=1e-9):
     bes = []
 
     for i in range(len(S) - 1):
-        y1, y2 = pnl[i], pnl[i + 1]
         x1, x2 = S[i], S[i + 1]
+        y1, y2 = pnl[i], pnl[i + 1]
 
         if abs(y1) < tol:
             bes.append(x1)
 
         if y1 * y2 < 0:
-            x_star = x1 - y1 * (x2 - x1) / (y2 - y1)
-            bes.append(x_star)
+            root = x1 - y1 * (x2 - x1) / (y2 - y1)
+            bes.append(root)
 
     if abs(pnl[-1]) < tol:
         bes.append(S[-1])
@@ -126,291 +195,339 @@ def find_break_evens(S, pnl, tol=1e-8):
     for x in bes:
         if not cleaned or abs(x - cleaned[-1]) > 1e-4:
             cleaned.append(x)
+
     return cleaned
 
 
-def net_initial_cost(legs):
-    total = 0.0
-    for leg in legs:
-        qty = float(leg["qty"])
-        mult = float(leg["multiplier"])
-        premium = float(leg["premium"])
-        side = leg["side"]
-        instrument = leg["instrument"]
-
-        if instrument == "Forward":
-            cash = 0.0
-        else:
-            cash = premium * qty * mult
-
-        total += cash if side == "Long" else -cash
-    return total
-
-
-def payoff_at_point(S0, legs):
-    payoff, pnl, _, _ = portfolio_payoff(np.array([S0]), legs)
-    return float(payoff[0]), float(pnl[0])
-
-
-def load_template(template_name, spot):
-    if template_name == "Long Call":
+def load_template(name, spot):
+    if name == "Long Call":
         return [
             {"instrument": "Call", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0}
         ]
-    if template_name == "Long Put":
+    if name == "Long Put":
         return [
             {"instrument": "Put", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0}
         ]
-    if template_name == "Long Forward":
+    if name == "Long Forward":
         return [
             {"instrument": "Forward", "side": "Long", "K": round(spot, 2), "premium": 0.0, "qty": 1.0, "multiplier": 1.0}
         ]
-    if template_name == "Protective Put":
+    if name == "Protective Put":
         return [
             {"instrument": "Stock", "side": "Long", "K": 0.0, "premium": round(spot, 2), "qty": 1.0, "multiplier": 1.0},
-            {"instrument": "Put", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0},
+            {"instrument": "Put", "side": "Long", "K": round(spot, 2), "premium": 4.0, "qty": 1.0, "multiplier": 1.0},
         ]
-    if template_name == "Covered Call":
+    if name == "Covered Call":
         return [
             {"instrument": "Stock", "side": "Long", "K": 0.0, "premium": round(spot, 2), "qty": 1.0, "multiplier": 1.0},
             {"instrument": "Call", "side": "Short", "K": round(1.05 * spot, 2), "premium": 4.0, "qty": 1.0, "multiplier": 1.0},
         ]
-    if template_name == "Bull Call Spread":
+    if name == "Bull Call Spread":
         return [
-            {"instrument": "Call", "side": "Long", "K": round(0.95 * spot, 2), "premium": 8.0, "qty": 1.0, "multiplier": 1.0},
+            {"instrument": "Call", "side": "Long", "K": round(0.95 * spot, 2), "premium": 7.0, "qty": 1.0, "multiplier": 1.0},
             {"instrument": "Call", "side": "Short", "K": round(1.05 * spot, 2), "premium": 3.0, "qty": 1.0, "multiplier": 1.0},
         ]
-    if template_name == "Bear Put Spread":
+    if name == "Bear Put Spread":
         return [
-            {"instrument": "Put", "side": "Long", "K": round(1.05 * spot, 2), "premium": 8.0, "qty": 1.0, "multiplier": 1.0},
+            {"instrument": "Put", "side": "Long", "K": round(1.05 * spot, 2), "premium": 7.0, "qty": 1.0, "multiplier": 1.0},
             {"instrument": "Put", "side": "Short", "K": round(0.95 * spot, 2), "premium": 3.0, "qty": 1.0, "multiplier": 1.0},
         ]
-    if template_name == "Long Straddle":
+    if name == "Long Straddle":
         return [
-            {"instrument": "Call", "side": "Long", "K": round(spot, 2), "premium": 6.0, "qty": 1.0, "multiplier": 1.0},
-            {"instrument": "Put", "side": "Long", "K": round(spot, 2), "premium": 6.0, "qty": 1.0, "multiplier": 1.0},
+            {"instrument": "Call", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0},
+            {"instrument": "Put", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0},
         ]
-    return [
-        {"instrument": "Call", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0}
-    ]
+    return []
 
 
-def strategy_explanation(name):
-    explanations = {
-        "Long Call": "Ganas si el subyacente sube por arriba del strike; la pérdida máxima es la prima pagada.",
-        "Long Put": "Ganas si el subyacente cae por debajo del strike; la pérdida máxima es la prima pagada.",
-        "Long Forward": "El payoff es lineal: ganas cuando el precio final queda arriba del precio forward.",
-        "Protective Put": "Combina una posición larga en el activo con un put comprado para limitar la pérdida.",
-        "Covered Call": "Combina el activo con un call vendido; sacrificas parte del upside a cambio de recibir prima.",
-        "Bull Call Spread": "Apuesta alcista con ganancia y pérdida acotadas usando dos calls.",
-        "Bear Put Spread": "Apuesta bajista con ganancia y pérdida acotadas usando dos puts.",
-        "Long Straddle": "Apuesta a movimientos grandes en cualquier dirección comprando call y put del mismo strike.",
-        "Custom": "Construye tu propia estrategia sumando instrumentos.",
+def template_explanation(name):
+    d = {
+        "Long Call": "Ganas si el precio final sube por arriba del strike. La pérdida máxima es la prima pagada.",
+        "Long Put": "Ganas si el precio final cae por debajo del strike. La pérdida máxima es la prima pagada.",
+        "Long Forward": "El payoff es lineal. Ganas si el precio final termina arriba del precio forward.",
+        "Protective Put": "Combina activo + put comprado. Sirve para limitar la pérdida a la baja.",
+        "Covered Call": "Combina activo + call vendido. Cobras una prima pero limitas parte de la ganancia al alza.",
+        "Bull Call Spread": "Apuesta alcista con ganancia y pérdida acotadas.",
+        "Bear Put Spread": "Apuesta bajista con ganancia y pérdida acotadas.",
+        "Long Straddle": "Apuesta a movimientos grandes en cualquier dirección.",
     }
-    return explanations.get(name, "")
+    return d.get(name, "")
 
 
 # =========================================================
-# SESSION STATE
+# STATE
 # =========================================================
 if "legs" not in st.session_state:
     st.session_state.legs = []
 
-if "last_template" not in st.session_state:
-    st.session_state.last_template = "Custom"
+if "chart_period" not in st.session_state:
+    st.session_state.chart_period = "6mo"
 
 
 # =========================================================
-# SIDEBAR - MARKET DATA
+# SIDEBAR
 # =========================================================
-st.sidebar.header("Datos del subyacente")
+st.sidebar.header("Datos del mercado")
 
-popular_tickers = [
+tickers = [
     "AAPL", "MSFT", "SPY", "TSLA", "NVDA", "AMZN", "GOOGL",
     "META", "QQQ", "IWM", "BTC-USD", "ETH-USD", "USDMXN=X", "^GSPC"
 ]
 
-ticker = st.sidebar.selectbox("Ticker (Yahoo Finance)", popular_tickers, index=0)
-manual_override = st.sidebar.checkbox("Editar spot manualmente", value=False)
+ticker = st.sidebar.selectbox("Ticker", tickers, index=12 if "USDMXN=X" in tickers else 0)
 
-spot_yahoo, hist = get_spot_from_yahoo(ticker)
+period_options = ["1mo", "3mo", "6mo", "1y"]
+period = st.sidebar.radio("Histórico", period_options, index=2, horizontal=True)
 
-if spot_yahoo is None:
-    st.sidebar.error("No pude descargar el precio desde Yahoo Finance.")
-    fallback_spot = 100.0
+manual_spot = st.sidebar.checkbox("Editar spot manualmente", value=False)
+
+spot_mkt, chg, chg_pct, hist = get_market_data(ticker, period=period)
+
+if spot_mkt is None:
+    st.sidebar.error("No pude descargar datos de Yahoo Finance.")
+    spot_mkt = 100.0
+    chg = 0.0
+    chg_pct = 0.0
+
+if manual_spot:
+    spot = st.sidebar.number_input("Spot manual", min_value=0.0, value=float(round(spot_mkt, 4)), step=0.1)
 else:
-    fallback_spot = round(spot_yahoo, 4)
+    spot = float(round(spot_mkt, 4))
 
-if manual_override:
-    spot = st.sidebar.number_input("Spot manual", min_value=0.0, value=float(fallback_spot), step=0.1)
-else:
-    spot = float(fallback_spot)
+refresh = st.sidebar.button("Actualizar datos", use_container_width=True)
+if refresh:
+    st.rerun()
 
-st.sidebar.metric("Spot usado", f"{spot:,.4f}")
 
+# =========================================================
+# TOP BAR
+# =========================================================
+m1, m2, m3, m4 = st.columns([1.2, 1, 1, 1])
+
+with m1:
+    st.markdown(f"### `{ticker}`")
+
+with m2:
+    st.metric("Spot", f"{spot:,.4f}")
+
+with m3:
+    st.metric("Cambio", f"{chg:,.4f}")
+
+with m4:
+    st.metric("% cambio", f"{chg_pct:,.2f}%")
+
+
+# =========================================================
+# HIST CHART
+# =========================================================
 if hist is not None:
-    st.sidebar.caption("Cierre reciente tomado de Yahoo Finance")
-
-
-# =========================================================
-# TOP MARKET VIEW
-# =========================================================
-c1, c2 = st.columns([1.2, 1.8])
-
-with c1:
-    st.subheader("Subyacente")
-    st.write(f"**Ticker:** `{ticker}`")
-    st.write(f"**Spot actual usado en la app:** `{spot:,.4f}`")
-
-with c2:
-    if hist is not None:
-        fig_hist = go.Figure()
-        fig_hist.add_trace(
-            go.Scatter(
-                x=hist["Date"],
-                y=hist["Close"],
-                mode="lines",
-                name="Close",
-            )
+    fig_hist = go.Figure()
+    fig_hist.add_trace(
+        go.Scatter(
+            x=hist["Date"],
+            y=hist["Close"],
+            mode="lines",
+            name="Close",
+            line=dict(width=3),
         )
-        fig_hist.update_layout(
-            title="Cierres recientes",
-            height=280,
-            margin=dict(l=20, r=20, t=50, b=20),
-            xaxis_title="Fecha",
-            yaxis_title="Precio",
-        )
-        st.plotly_chart(fig_hist, use_container_width=True)
-
-
-# =========================================================
-# STRATEGY BUILDER
-# =========================================================
-st.markdown("---")
-st.subheader("Strategy Builder")
-
-left, right = st.columns([1.1, 1.9])
-
-with left:
-    template = st.selectbox(
-        "Template de estrategia",
-        [
-            "Custom",
-            "Long Call",
-            "Long Put",
-            "Long Forward",
-            "Protective Put",
-            "Covered Call",
-            "Bull Call Spread",
-            "Bear Put Spread",
-            "Long Straddle",
-        ],
-        index=0,
     )
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        if st.button("Cargar template", use_container_width=True):
-            st.session_state.legs = load_template(template, spot)
-            st.session_state.last_template = template
+    fig_hist.add_hline(y=spot, line_dash="dot", line_width=1.2)
+    fig_hist.add_annotation(
+        x=hist["Date"].iloc[-1],
+        y=spot,
+        text=f"Spot {spot:,.4f}",
+        showarrow=False,
+        xanchor="left",
+    )
 
-    with col_b:
+    fig_hist.update_layout(
+        title="Cierres recientes",
+        height=320,
+        margin=dict(l=20, r=20, t=50, b=20),
+        xaxis_title="Fecha",
+        yaxis_title="Precio",
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+
+st.markdown("---")
+
+
+# =========================================================
+# QUICK TEMPLATES
+# =========================================================
+st.subheader("Estrategias rápidas")
+
+t1, t2, t3, t4, t5, t6, t7, t8 = st.columns(8)
+
+if t1.button("Long Call", use_container_width=True):
+    st.session_state.legs = load_template("Long Call", spot)
+    st.rerun()
+
+if t2.button("Long Put", use_container_width=True):
+    st.session_state.legs = load_template("Long Put", spot)
+    st.rerun()
+
+if t3.button("Forward", use_container_width=True):
+    st.session_state.legs = load_template("Long Forward", spot)
+    st.rerun()
+
+if t4.button("Protective Put", use_container_width=True):
+    st.session_state.legs = load_template("Protective Put", spot)
+    st.rerun()
+
+if t5.button("Covered Call", use_container_width=True):
+    st.session_state.legs = load_template("Covered Call", spot)
+    st.rerun()
+
+if t6.button("Bull Spread", use_container_width=True):
+    st.session_state.legs = load_template("Bull Call Spread", spot)
+    st.rerun()
+
+if t7.button("Bear Spread", use_container_width=True):
+    st.session_state.legs = load_template("Bear Put Spread", spot)
+    st.rerun()
+
+if t8.button("Straddle", use_container_width=True):
+    st.session_state.legs = load_template("Long Straddle", spot)
+    st.rerun()
+
+
+# =========================================================
+# MAIN LAYOUT
+# =========================================================
+left, right = st.columns([1.05, 2.1])
+
+
+# =========================================================
+# LEFT PANEL
+# =========================================================
+with left:
+    st.subheader("Builder")
+
+    with st.expander("Agregar instrumento", expanded=True):
+        with st.form("add_leg_form"):
+            instrument_new = st.selectbox("Instrumento", ["Call", "Put", "Forward", "Stock"])
+            side_new = st.selectbox("Posición", ["Long", "Short"])
+
+            K_default = float(round(spot, 2))
+            premium_default = float(round(spot, 2)) if instrument_new == "Stock" else 5.0
+
+            K_new = st.number_input("Strike / Forward", min_value=0.0, value=K_default, step=1.0)
+            premium_new = st.number_input("Prima / costo inicial", min_value=0.0, value=premium_default, step=1.0)
+            qty_new = st.number_input("Cantidad", min_value=0.0, value=1.0, step=1.0)
+            mult_new = st.number_input("Multiplicador", min_value=0.0, value=1.0, step=1.0)
+
+            add_submitted = st.form_submit_button("Agregar")
+            if add_submitted:
+                st.session_state.legs.append(
+                    {
+                        "instrument": instrument_new,
+                        "side": side_new,
+                        "K": float(K_new),
+                        "premium": float(premium_new),
+                        "qty": float(qty_new),
+                        "multiplier": float(mult_new),
+                    }
+                )
+                st.rerun()
+
+    with st.expander("Controles visuales", expanded=True):
+        low_pct = st.slider("Rango abajo (%)", 0, 95, 40, 5)
+        high_pct = st.slider("Rango arriba (%)", 0, 250, 40, 5)
+
+        show_total_payoff = st.checkbox("Mostrar total payoff", value=True)
+        show_total_pnl = st.checkbox("Mostrar total P&L", value=True)
+        show_legs = st.checkbox("Mostrar patas individuales", value=True)
+        show_break_evens = st.checkbox("Mostrar break-even(s)", value=True)
+
+    if len(st.session_state.legs) > 0:
+        S_temp, smin_temp, smax_temp = build_price_grid(spot, low_pct, high_pct, n=501)
+        ST = st.slider(
+            "Precio final al vencimiento (S_T)",
+            min_value=float(round(smin_temp, 4)),
+            max_value=float(round(smax_temp, 4)),
+            value=float(round(spot, 4)),
+            step=float(max((smax_temp - smin_temp) / 200, 0.01)),
+        )
+
+        st.caption("Mueve este slider para ver qué pasa con cada instrumento y con la estrategia total.")
+
+    colx, coly = st.columns(2)
+    with colx:
         if st.button("Vaciar estrategia", use_container_width=True):
             st.session_state.legs = []
-            st.session_state.last_template = "Custom"
+            st.rerun()
 
-    st.info(strategy_explanation(template))
-
-    st.markdown("### Agregar instrumento")
-    with st.form("add_leg_form", clear_on_submit=False):
-        instrument_new = st.selectbox("Instrumento", ["Call", "Put", "Forward", "Stock"])
-        side_new = st.selectbox("Posición", ["Long", "Short"])
-        K_new = st.number_input(
-            "Strike / Forward price",
-            min_value=0.0,
-            value=float(round(spot, 2)),
-            step=1.0,
-        )
-        premium_default = float(round(spot, 2)) if instrument_new == "Stock" else 5.0
-        premium_new = st.number_input(
-            "Prima / costo inicial",
-            min_value=0.0,
-            value=premium_default,
-            step=1.0,
-        )
-        qty_new = st.number_input("Cantidad", min_value=0.0, value=1.0, step=1.0)
-        mult_new = st.number_input("Multiplicador", min_value=0.0, value=1.0, step=1.0)
-
-        submitted = st.form_submit_button("Agregar instrumento")
-        if submitted:
-            st.session_state.legs.append(
-                {
-                    "instrument": instrument_new,
-                    "side": side_new,
-                    "K": float(K_new),
-                    "premium": float(premium_new),
-                    "qty": float(qty_new),
-                    "multiplier": float(mult_new),
-                }
+    with coly:
+        if len(st.session_state.legs) > 0:
+            remove_idx = st.selectbox(
+                "Borrar leg",
+                options=list(range(1, len(st.session_state.legs) + 1)),
+                format_func=lambda x: f"Leg {x}",
             )
+            if st.button("Borrar seleccionada", use_container_width=True):
+                st.session_state.legs.pop(remove_idx - 1)
+                st.rerun()
 
-    st.markdown("### Configuración de la gráfica")
-    low_pct = st.slider("Rango hacia abajo (%)", 0, 95, 50, 5)
-    high_pct = st.slider("Rango hacia arriba (%)", 0, 300, 50, 5)
-    show_payoff = st.checkbox("Mostrar payoff bruto", value=True)
-    show_pnl = st.checkbox("Mostrar P&L neto", value=True)
-    show_legs = st.checkbox("Mostrar cada pata individualmente", value=True)
-    show_break_evens = st.checkbox("Mostrar break-even(s)", value=True)
 
+# =========================================================
+# RIGHT PANEL
+# =========================================================
 with right:
     if len(st.session_state.legs) == 0:
-        st.warning("Todavía no hay instrumentos en la estrategia. Agrega uno o carga un template.")
+        st.info("Agrega instrumentos o usa los botones de estrategias rápidas.")
     else:
-        S, s_min, s_max = build_price_grid(spot, low_pct=low_pct, high_pct=high_pct, n=1201)
-
+        S, s_min, s_max = build_price_grid(spot, low_pct, high_pct, n=1201)
         total_payoff, total_pnl, leg_payoffs, leg_pnls = portfolio_payoff(S, st.session_state.legs)
         be_list = find_break_evens(S, total_pnl)
         net_cost = net_initial_cost(st.session_state.legs)
-        payoff_spot, pnl_spot = payoff_at_point(spot, st.session_state.legs)
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Payoff en spot", f"{payoff_spot:,.2f}")
-        m2.metric("P&L en spot", f"{pnl_spot:,.2f}")
-        m3.metric("Costo neto inicial", f"{net_cost:,.2f}")
-        if len(be_list) == 0:
-            m4.metric("Break-even(s)", "N/A")
-        else:
-            m4.metric("Break-even(s)", ", ".join([f"{x:,.2f}" for x in be_list[:3]]))
+        detail_df, total_payoff_ST, total_pnl_ST = payoff_pnl_at_ST(ST, st.session_state.legs)
+
+        max_profit = np.max(total_pnl)
+        max_loss = np.min(total_pnl)
+
+        r1, r2, r3, r4, r5 = st.columns(5)
+        r1.metric("Costo inicial neto", f"{net_cost:,.2f}")
+        r2.metric("Payoff total @ S_T", f"{total_payoff_ST:,.2f}")
+        r3.metric("P&L total @ S_T", f"{total_pnl_ST:,.2f}")
+        r4.metric("Max P&L en rango", f"{max_profit:,.2f}")
+        r5.metric("Min P&L en rango", f"{max_loss:,.2f}")
 
         fig = go.Figure()
 
         if show_legs:
             for i, leg in enumerate(st.session_state.legs):
-                label = f"Leg {i+1}: {leg['side']} {leg['instrument']}"
-                if show_payoff:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=S,
-                            y=leg_payoffs[i],
-                            mode="lines",
-                            name=f"{label} | Payoff",
-                            line=dict(width=1.5, dash="dot"),
-                            opacity=0.55,
-                        )
-                    )
-                if show_pnl:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=S,
-                            y=leg_pnls[i],
-                            mode="lines",
-                            name=f"{label} | P&L",
-                            line=dict(width=1.5, dash="dash"),
-                            opacity=0.55,
-                        )
-                    )
+                base_name = f"Leg {i+1}: {leg['side']} {leg['instrument']}"
 
-        if show_payoff:
+                fig.add_trace(
+                    go.Scatter(
+                        x=S,
+                        y=leg_payoffs[i],
+                        mode="lines",
+                        name=f"{base_name} | payoff",
+                        line=dict(width=1.5, dash="dot"),
+                        opacity=0.45,
+                        visible=True if show_total_payoff else "legendonly",
+                    )
+                )
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=S,
+                        y=leg_pnls[i],
+                        mode="lines",
+                        name=f"{base_name} | P&L",
+                        line=dict(width=1.5, dash="dash"),
+                        opacity=0.45,
+                        visible=True if show_total_pnl else "legendonly",
+                    )
+                )
+
+        if show_total_payoff:
             fig.add_trace(
                 go.Scatter(
                     x=S,
@@ -421,7 +538,7 @@ with right:
                 )
             )
 
-        if show_pnl:
+        if show_total_pnl:
             fig.add_trace(
                 go.Scatter(
                     x=S,
@@ -433,12 +550,23 @@ with right:
             )
 
         fig.add_hline(y=0, line_dash="dash", line_width=1)
-        fig.add_vline(x=spot, line_dash="dot", line_width=1.5)
+
+        fig.add_vline(x=spot, line_dash="dot", line_width=1.4)
         fig.add_annotation(
             x=spot,
-            y=1,
+            y=1.0,
             yref="paper",
             text=f"Spot = {spot:,.2f}",
+            showarrow=False,
+            xanchor="left",
+        )
+
+        fig.add_vline(x=ST, line_dash="solid", line_width=2)
+        fig.add_annotation(
+            x=ST,
+            y=0.93,
+            yref="paper",
+            text=f"S_T = {ST:,.2f}",
             showarrow=False,
             xanchor="left",
         )
@@ -454,7 +582,7 @@ with right:
             fig.add_vline(x=k, line_dash="dot", line_width=1)
             fig.add_annotation(
                 x=k,
-                y=0.94,
+                y=0.86,
                 yref="paper",
                 text=f"K={k:,.2f}",
                 showarrow=False,
@@ -466,31 +594,68 @@ with right:
                 fig.add_vline(x=be, line_dash="dash", line_width=1)
                 fig.add_annotation(
                     x=be,
-                    y=0.85,
+                    y=0.77,
                     yref="paper",
                     text=f"BE={be:,.2f}",
                     showarrow=False,
                     textangle=-90,
                 )
 
+        fig.add_trace(
+            go.Scatter(
+                x=[ST],
+                y=[total_payoff_ST],
+                mode="markers",
+                marker=dict(size=11),
+                name="Total payoff @ S_T",
+                visible=True if show_total_payoff else "legendonly",
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=[ST],
+                y=[total_pnl_ST],
+                mode="markers",
+                marker=dict(size=11),
+                name="Total P&L @ S_T",
+                visible=True if show_total_pnl else "legendonly",
+            )
+        )
+
         fig.update_layout(
-            title="Perfil de payoff / P&L de la estrategia",
+            title="Perfil de payoff / P&L",
             xaxis_title="Precio del subyacente al vencimiento",
             yaxis_title="Valor",
             hovermode="x unified",
-            height=620,
+            height=700,
             margin=dict(l=20, r=20, t=60, b=20),
             legend_title="Curvas",
         )
 
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("### Instrumentos actuales")
-        table_rows = []
-        for i, leg in enumerate(st.session_state.legs, start=1):
-            table_rows.append(
+        st.subheader("Qué pasa en ese precio final")
+        st.write(f"Actualmente estás evaluando la estrategia en **S_T = {ST:,.4f}**.")
+        st.dataframe(
+            detail_df.style.format(
                 {
-                    "Leg": i,
+                    "K": "{:,.2f}",
+                    "Premium": "{:,.2f}",
+                    "Qty": "{:,.2f}",
+                    "Multiplier": "{:,.2f}",
+                    "Payoff@ST": "{:,.2f}",
+                    "PnL@ST": "{:,.2f}",
+                }
+            ),
+            use_container_width=True,
+        )
+
+        st.subheader("Patas actuales")
+        current_legs_df = pd.DataFrame(
+            [
+                {
+                    "Leg": i + 1,
                     "Instrument": leg["instrument"],
                     "Side": leg["side"],
                     "K": leg["K"],
@@ -498,33 +663,31 @@ with right:
                     "Qty": leg["qty"],
                     "Multiplier": leg["multiplier"],
                 }
-            )
-        st.dataframe(pd.DataFrame(table_rows), use_container_width=True)
-
-        st.markdown("### Editar / borrar patas")
-        remove_idx = st.selectbox(
-            "Selecciona una pata para borrar",
-            options=list(range(1, len(st.session_state.legs) + 1)),
-            format_func=lambda x: f"Leg {x}",
+                for i, leg in enumerate(st.session_state.legs)
+            ]
         )
-        if st.button("Borrar pata seleccionada"):
-            st.session_state.legs.pop(remove_idx - 1)
-            st.rerun()
 
+        st.dataframe(
+            current_legs_df.style.format(
+                {
+                    "K": "{:,.2f}",
+                    "Premium": "{:,.2f}",
+                    "Qty": "{:,.2f}",
+                    "Multiplier": "{:,.2f}",
+                }
+            ),
+            use_container_width=True,
+        )
 
-# =========================================================
-# PEDAGOGICAL SECTION
-# =========================================================
 st.markdown("---")
-st.subheader("Cómo leer la gráfica")
+st.subheader("Cómo usarla en clase")
+
 
 st.write(
     """
-- **Payoff**: cuánto paga el instrumento o la estrategia al vencimiento, sin considerar la prima pagada o recibida.
-- **P&L**: ganancia o pérdida neta, ya incorporando la prima.
-- **Long**: compras el instrumento.
+- **Payoff**: pago bruto al vencimiento.  
+- **P&L**: ganancia o pérdida neta, incorporando la prima o costo inicial.  
+- **Long**: compras el instrumento.  
 - **Short**: vendes el instrumento.
-- **La estrategia total** es la suma de todas las patas.
 """
 )
-
