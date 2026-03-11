@@ -241,7 +241,7 @@ def load_template(name, spot):
 
 
 # =========================================================
-# STATE
+# SESSION STATE
 # =========================================================
 if "legs" not in st.session_state:
     st.session_state.legs = []
@@ -251,6 +251,20 @@ if "last_ticker" not in st.session_state:
 
 if "last_period" not in st.session_state:
     st.session_state.last_period = None
+
+# Inputs del builder
+if "new_instrument" not in st.session_state:
+    st.session_state.new_instrument = "Call"
+if "new_side" not in st.session_state:
+    st.session_state.new_side = "Long"
+if "new_K" not in st.session_state:
+    st.session_state.new_K = 100.0
+if "new_premium" not in st.session_state:
+    st.session_state.new_premium = 5.0
+if "new_qty" not in st.session_state:
+    st.session_state.new_qty = 1.0
+if "new_multiplier" not in st.session_state:
+    st.session_state.new_multiplier = 1.0
 
 
 # =========================================================
@@ -283,26 +297,24 @@ if manual_spot:
 else:
     spot = float(round(spot_mkt, 4))
 
-# FIX PRINCIPAL:
-# si cambia el ticker, se vacía la estrategia para no mezclar legs viejas
-# con el nuevo subyacente
+# Si cambia ticker, limpiamos la estrategia
 if st.session_state.last_ticker is None:
     st.session_state.last_ticker = ticker
 
 if st.session_state.last_ticker != ticker:
     st.session_state.legs = []
     st.session_state.last_ticker = ticker
+    st.session_state.new_K = float(round(spot, 2))
+    st.session_state.new_premium = 5.0
     st.rerun()
 
-# si cambia el horizonte del histórico, solo actualizamos el registro
 if st.session_state.last_period is None:
     st.session_state.last_period = period
 
 if st.session_state.last_period != period:
     st.session_state.last_period = period
 
-refresh = st.sidebar.button("Actualizar datos", use_container_width=True)
-if refresh:
+if st.sidebar.button("Actualizar datos", use_container_width=True):
     st.rerun()
 
 
@@ -414,31 +426,78 @@ with left:
     st.subheader("Builder")
 
     with st.expander("Agregar instrumento", expanded=True):
-        with st.form("add_leg_form"):
-            instrument_new = st.selectbox("Instrumento", ["Call", "Put", "Forward", "Stock"])
-            side_new = st.selectbox("Posición", ["Long", "Short"])
+        st.selectbox(
+            "Instrumento",
+            ["Call", "Put", "Forward", "Stock"],
+            key="new_instrument",
+        )
 
-            K_default = float(round(spot, 2))
-            premium_default = float(round(spot, 2)) if instrument_new == "Stock" else 5.0
+        st.selectbox(
+            "Posición",
+            ["Long", "Short"],
+            key="new_side",
+        )
 
-            K_new = st.number_input("Strike / Forward", min_value=0.0, value=K_default, step=1.0)
-            premium_new = st.number_input("Prima / costo inicial", min_value=0.0, value=premium_default, step=1.0)
-            qty_new = st.number_input("Cantidad", min_value=0.0, value=1.0, step=1.0)
-            mult_new = st.number_input("Multiplicador", min_value=0.0, value=1.0, step=1.0)
+        if st.session_state.new_instrument == "Stock":
+            default_premium = float(round(spot, 2))
+        elif st.session_state.new_instrument == "Forward":
+            default_premium = 0.0
+        else:
+            default_premium = st.session_state.new_premium
 
-            add_submitted = st.form_submit_button("Agregar")
-            if add_submitted:
-                st.session_state.legs.append(
-                    {
-                        "instrument": instrument_new,
-                        "side": side_new,
-                        "K": float(K_new),
-                        "premium": float(premium_new),
-                        "qty": float(qty_new),
-                        "multiplier": float(mult_new),
-                    }
-                )
-                st.rerun()
+        st.number_input(
+            "Strike / Forward",
+            min_value=0.0,
+            step=1.0,
+            key="new_K",
+        )
+
+        st.number_input(
+            "Prima / costo inicial",
+            min_value=0.0,
+            value=float(default_premium),
+            step=1.0,
+            key="new_premium",
+        )
+
+        st.number_input(
+            "Cantidad",
+            min_value=0.0,
+            step=1.0,
+            key="new_qty",
+        )
+
+        st.number_input(
+            "Multiplicador",
+            min_value=0.0,
+            step=1.0,
+            key="new_multiplier",
+        )
+
+        if st.button("Agregar", use_container_width=True):
+            st.session_state.legs.append(
+                {
+                    "instrument": st.session_state.new_instrument,
+                    "side": st.session_state.new_side,
+                    "K": float(st.session_state.new_K),
+                    "premium": float(st.session_state.new_premium),
+                    "qty": float(st.session_state.new_qty),
+                    "multiplier": float(st.session_state.new_multiplier),
+                }
+            )
+
+            # mantener defaults razonables
+            st.session_state.new_K = float(round(spot, 2))
+            if st.session_state.new_instrument == "Stock":
+                st.session_state.new_premium = float(round(spot, 2))
+            elif st.session_state.new_instrument == "Forward":
+                st.session_state.new_premium = 0.0
+            else:
+                st.session_state.new_premium = 5.0
+
+            st.session_state.new_qty = 1.0
+            st.session_state.new_multiplier = 1.0
+            st.rerun()
 
     with st.expander("Controles visuales", expanded=True):
         low_pct = st.slider("Rango abajo (%)", 0, 95, 40, 5)
@@ -451,17 +510,20 @@ with left:
 
     if len(st.session_state.legs) > 0:
         S_temp, smin_temp, smax_temp = build_price_grid(spot, low_pct, high_pct, n=501)
+        step_temp = max((smax_temp - smin_temp) / 200, 0.01)
+
         ST = st.slider(
             "Precio final al vencimiento (S_T)",
             min_value=float(round(smin_temp, 4)),
             max_value=float(round(smax_temp, 4)),
             value=float(round(spot, 4)),
-            step=float(max((smax_temp - smin_temp) / 200, 0.01)),
+            step=float(step_temp),
         )
 
         st.caption("Mueve este slider para ver qué pasa con cada instrumento y con la estrategia total.")
 
     colx, coly = st.columns(2)
+
     with colx:
         if st.button("Vaciar estrategia", use_container_width=True):
             st.session_state.legs = []
