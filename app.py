@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 st.title("Payoff Lab")
-st.caption("Visualizador introductorio de payoffs de derivados con spot real vía Yahoo Finance")
+st.caption("Visualizador introductorio de payoffs de derivados")
 
 
 # =========================================================
@@ -528,11 +528,3 @@ st.write(
 """
 )
 
-st.write(
-    """
-Sugerencia para clase:
-1. Empieza con una sola pata: long call, short call, long put, short put, long forward.
-2. Después agrega una segunda pata para mostrar cómo se suman visualmente los payoffs.
-3. Finalmente carga templates como **protective put**, **covered call** o **bull call spread**.
-"""
-)
