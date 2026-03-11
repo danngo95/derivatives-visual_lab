@@ -113,7 +113,7 @@ def portfolio_payoff(S, legs):
     return total_payoff, total_pnl, leg_payoffs, leg_pnls
 
 
-def build_price_grid(spot, low_pct=40, high_pct=40, n=1201):
+def build_price_grid(spot, low_pct=40, high_pct=40, n=601):
     s_min = max(0.0, spot * (1 - low_pct / 100.0))
     s_max = max(s_min + 1e-8, spot * (1 + high_pct / 100.0))
     return np.linspace(s_min, s_max, n), s_min, s_max
@@ -209,40 +209,131 @@ def clamp(x, xmin, xmax):
 def load_template(name, spot):
     if name == "Long Call":
         return [
-            {"instrument": "Call", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0}
+            {
+                "instrument": "Call",
+                "side": "Long",
+                "K": round(spot, 2),
+                "premium": 5.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            }
         ]
     if name == "Long Put":
         return [
-            {"instrument": "Put", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0}
+            {
+                "instrument": "Put",
+                "side": "Long",
+                "K": round(spot, 2),
+                "premium": 5.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            }
         ]
     if name == "Long Forward":
         return [
-            {"instrument": "Forward", "side": "Long", "K": round(spot, 2), "premium": 0.0, "qty": 1.0, "multiplier": 1.0}
+            {
+                "instrument": "Forward",
+                "side": "Long",
+                "K": round(spot, 2),
+                "premium": 0.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            }
         ]
     if name == "Protective Put":
         return [
-            {"instrument": "Stock", "side": "Long", "K": 0.0, "premium": round(spot, 2), "qty": 1.0, "multiplier": 1.0},
-            {"instrument": "Put", "side": "Long", "K": round(spot, 2), "premium": 4.0, "qty": 1.0, "multiplier": 1.0},
+            {
+                "instrument": "Stock",
+                "side": "Long",
+                "K": 0.0,
+                "premium": round(spot, 2),
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
+            {
+                "instrument": "Put",
+                "side": "Long",
+                "K": round(spot, 2),
+                "premium": 4.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
         ]
     if name == "Covered Call":
         return [
-            {"instrument": "Stock", "side": "Long", "K": 0.0, "premium": round(spot, 2), "qty": 1.0, "multiplier": 1.0},
-            {"instrument": "Call", "side": "Short", "K": round(1.05 * spot, 2), "premium": 4.0, "qty": 1.0, "multiplier": 1.0},
+            {
+                "instrument": "Stock",
+                "side": "Long",
+                "K": 0.0,
+                "premium": round(spot, 2),
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
+            {
+                "instrument": "Call",
+                "side": "Short",
+                "K": round(1.05 * spot, 2),
+                "premium": 4.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
         ]
     if name == "Bull Call Spread":
         return [
-            {"instrument": "Call", "side": "Long", "K": round(0.95 * spot, 2), "premium": 7.0, "qty": 1.0, "multiplier": 1.0},
-            {"instrument": "Call", "side": "Short", "K": round(1.05 * spot, 2), "premium": 3.0, "qty": 1.0, "multiplier": 1.0},
+            {
+                "instrument": "Call",
+                "side": "Long",
+                "K": round(0.95 * spot, 2),
+                "premium": 7.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
+            {
+                "instrument": "Call",
+                "side": "Short",
+                "K": round(1.05 * spot, 2),
+                "premium": 3.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
         ]
     if name == "Bear Put Spread":
         return [
-            {"instrument": "Put", "side": "Long", "K": round(1.05 * spot, 2), "premium": 7.0, "qty": 1.0, "multiplier": 1.0},
-            {"instrument": "Put", "side": "Short", "K": round(0.95 * spot, 2), "premium": 3.0, "qty": 1.0, "multiplier": 1.0},
+            {
+                "instrument": "Put",
+                "side": "Long",
+                "K": round(1.05 * spot, 2),
+                "premium": 7.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
+            {
+                "instrument": "Put",
+                "side": "Short",
+                "K": round(0.95 * spot, 2),
+                "premium": 3.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
         ]
     if name == "Long Straddle":
         return [
-            {"instrument": "Call", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0},
-            {"instrument": "Put", "side": "Long", "K": round(spot, 2), "premium": 5.0, "qty": 1.0, "multiplier": 1.0},
+            {
+                "instrument": "Call",
+                "side": "Long",
+                "K": round(spot, 2),
+                "premium": 5.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
+            {
+                "instrument": "Put",
+                "side": "Long",
+                "K": round(spot, 2),
+                "premium": 5.0,
+                "qty": 1.0,
+                "multiplier": 1.0,
+            },
         ]
     return []
 
@@ -256,7 +347,10 @@ def set_builder_defaults_from_spot(spot):
     elif inst == "Forward":
         st.session_state.new_premium = 0.0
     else:
-        if "new_premium" not in st.session_state or st.session_state.new_premium in [0.0, float(round(spot, 2))]:
+        if (
+            "new_premium" not in st.session_state
+            or st.session_state.new_premium in [0.0, float(round(spot, 2))]
+        ):
             st.session_state.new_premium = 5.0
 
     if "new_qty" not in st.session_state:
@@ -265,10 +359,8 @@ def set_builder_defaults_from_spot(spot):
         st.session_state.new_multiplier = 1.0
 
 
-def reset_ST_if_needed(s_min, s_max, spot):
-    if "ST_eval" not in st.session_state:
-        st.session_state.ST_eval = float(round(spot, 4))
-    st.session_state.ST_eval = clamp(st.session_state.ST_eval, s_min, s_max)
+def reset_st_slider_to_spot(spot):
+    st.session_state.ST_eval = float(round(spot, 4))
 
 
 # =========================================================
@@ -283,6 +375,9 @@ if "last_ticker" not in st.session_state:
 if "last_period" not in st.session_state:
     st.session_state.last_period = None
 
+if "last_spot" not in st.session_state:
+    st.session_state.last_spot = None
+
 if "new_instrument" not in st.session_state:
     st.session_state.new_instrument = "Call"
 if "new_side" not in st.session_state:
@@ -295,6 +390,8 @@ if "new_qty" not in st.session_state:
     st.session_state.new_qty = 1.0
 if "new_multiplier" not in st.session_state:
     st.session_state.new_multiplier = 1.0
+if "ST_eval" not in st.session_state:
+    st.session_state.ST_eval = 100.0
 
 
 # =========================================================
@@ -303,8 +400,20 @@ if "new_multiplier" not in st.session_state:
 st.sidebar.header("Datos del mercado")
 
 tickers = [
-    "AAPL", "MSFT", "SPY", "TSLA", "NVDA", "AMZN", "GOOGL",
-    "META", "QQQ", "IWM", "BTC-USD", "ETH-USD", "USDMXN=X", "^GSPC"
+    "AAPL",
+    "MSFT",
+    "SPY",
+    "TSLA",
+    "NVDA",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "QQQ",
+    "IWM",
+    "BTC-USD",
+    "ETH-USD",
+    "USDMXN=X",
+    "^GSPC",
 ]
 
 ticker = st.sidebar.selectbox(
@@ -341,21 +450,31 @@ st.session_state.current_spot = float(spot)
 if st.session_state.last_ticker is None:
     st.session_state.last_ticker = ticker
     set_builder_defaults_from_spot(spot)
+    reset_st_slider_to_spot(spot)
+
+if st.session_state.last_period is None:
+    st.session_state.last_period = period
+
+if st.session_state.last_spot is None:
+    st.session_state.last_spot = float(spot)
 
 if st.session_state.last_ticker != ticker:
     st.session_state.legs = []
     st.session_state.last_ticker = ticker
     set_builder_defaults_from_spot(spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
+    st.session_state.last_spot = float(spot)
     st.rerun()
-
-if st.session_state.last_period is None:
-    st.session_state.last_period = period
 
 if st.session_state.last_period != period:
     st.session_state.last_period = period
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
+    st.session_state.last_spot = float(spot)
     st.rerun()
+
+if abs(float(st.session_state.last_spot) - float(spot)) > 1e-12:
+    st.session_state.last_spot = float(spot)
+    reset_st_slider_to_spot(spot)
 
 if st.sidebar.button("Actualizar datos", use_container_width=True):
     st.cache_data.clear()
@@ -416,7 +535,7 @@ if hist is not None:
         hovermode="x unified",
     )
 
-    st.plotly_chart(fig_hist, use_container_width=True, key=f"hist_{ticker}_{period}")
+    st.plotly_chart(fig_hist, use_container_width=True, key="hist_chart")
 
 st.markdown("---")
 
@@ -430,42 +549,42 @@ t1, t2, t3, t4, t5, t6, t7, t8 = st.columns(8)
 
 if t1.button("Long Call", use_container_width=True):
     st.session_state.legs = load_template("Long Call", spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t2.button("Long Put", use_container_width=True):
     st.session_state.legs = load_template("Long Put", spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t3.button("Forward", use_container_width=True):
     st.session_state.legs = load_template("Long Forward", spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t4.button("Protective Put", use_container_width=True):
     st.session_state.legs = load_template("Protective Put", spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t5.button("Covered Call", use_container_width=True):
     st.session_state.legs = load_template("Covered Call", spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t6.button("Bull Spread", use_container_width=True):
     st.session_state.legs = load_template("Bull Call Spread", spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t7.button("Bear Spread", use_container_width=True):
     st.session_state.legs = load_template("Bear Put Spread", spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
     st.rerun()
 
 if t8.button("Straddle", use_container_width=True):
     st.session_state.legs = load_template("Long Straddle", spot)
-    st.session_state.ST_eval = float(round(spot, 4))
+    reset_st_slider_to_spot(spot)
     st.rerun()
 
 
@@ -486,8 +605,16 @@ with left:
             instrument_options = ["Call", "Put", "Forward", "Stock"]
             side_options = ["Long", "Short"]
 
-            current_inst = st.session_state.new_instrument if st.session_state.new_instrument in instrument_options else "Call"
-            current_side = st.session_state.new_side if st.session_state.new_side in side_options else "Long"
+            current_inst = (
+                st.session_state.new_instrument
+                if st.session_state.new_instrument in instrument_options
+                else "Call"
+            )
+            current_side = (
+                st.session_state.new_side
+                if st.session_state.new_side in side_options
+                else "Long"
+            )
 
             inst_form = st.selectbox(
                 "Instrumento",
@@ -584,7 +711,7 @@ with left:
     with colx:
         if st.button("Vaciar estrategia", use_container_width=True):
             st.session_state.legs = []
-            st.session_state.ST_eval = float(round(spot, 4))
+            reset_st_slider_to_spot(spot)
             st.rerun()
 
     with coly:
@@ -593,7 +720,7 @@ with left:
                 "Borrar leg",
                 options=list(range(1, len(st.session_state.legs) + 1)),
                 format_func=lambda x: f"Leg {x}",
-                key=f"remove_leg_selector_{len(st.session_state.legs)}",
+                key="remove_leg_selector",
             )
             if st.button("Borrar seleccionada", use_container_width=True):
                 st.session_state.legs.pop(remove_idx - 1)
@@ -607,30 +734,46 @@ with right:
     if len(st.session_state.legs) == 0:
         st.info("Agrega instrumentos o usa los botones de estrategias rápidas.")
     else:
-        S, s_min, s_max = build_price_grid(spot, low_pct, high_pct, n=1201)
-        reset_ST_if_needed(s_min, s_max, spot)
+        S, s_min, s_max = build_price_grid(spot, low_pct, high_pct, n=601)
 
-        step_temp = max((s_max - s_min) / 200.0, 0.01)
+        s_min = float(round(s_min, 4))
+        s_max = float(round(s_max, 4))
+
+        # clamp del valor persistido del slider
+        st.session_state.ST_eval = clamp(st.session_state.ST_eval, s_min, s_max)
+
+        # paso más estable
+        width = s_max - s_min
+        if spot < 20:
+            step_temp = 0.05
+        elif spot < 200:
+            step_temp = 0.1
+        elif spot < 2000:
+            step_temp = 1.0
+        else:
+            step_temp = max(round(width / 150.0, 4), 5.0)
 
         ST = st.slider(
             "Precio final al vencimiento (S_T)",
-            min_value=float(round(s_min, 4)),
-            max_value=float(round(s_max, 4)),
-            value=float(round(st.session_state.ST_eval, 4)),
+            min_value=s_min,
+            max_value=s_max,
             step=float(step_temp),
+            key="ST_eval",
+            format="%.4f",
         )
+        ST = float(ST)
 
-        st.session_state.ST_eval = float(ST)
+        st.caption("Mueve el slider y observa cómo cambia el payoff de la estrategia.")
 
-        st.caption(
-            "Mueve el slider y observa cómo cambia el payoff de la estrategia."
+        total_payoff, total_pnl, leg_payoffs, leg_pnls = portfolio_payoff(
+            S, st.session_state.legs
         )
-
-        total_payoff, total_pnl, leg_payoffs, leg_pnls = portfolio_payoff(S, st.session_state.legs)
         be_list = find_break_evens(S, total_pnl)
         net_cost = net_initial_cost(st.session_state.legs)
 
-        detail_df, total_payoff_ST, total_pnl_ST = payoff_pnl_at_ST(ST, st.session_state.legs)
+        detail_df, total_payoff_ST, total_pnl_ST = payoff_pnl_at_ST(
+            ST, st.session_state.legs
+        )
 
         max_profit = float(np.max(total_pnl))
         max_loss = float(np.min(total_pnl))
@@ -808,7 +951,7 @@ with right:
         st.plotly_chart(
             fig,
             use_container_width=True,
-            key=f"payoff_chart_{ticker}_{period}_{low_pct}_{high_pct}_{len(st.session_state.legs)}_{round(spot, 4)}",
+            key="payoff_chart",
         )
 
         st.subheader("Qué pasa en ese precio final")
