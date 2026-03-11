@@ -265,19 +265,6 @@ def set_builder_defaults_from_spot(spot):
         st.session_state.new_multiplier = 1.0
 
 
-def on_instrument_change():
-    inst = st.session_state.new_instrument
-    if inst == "Stock":
-        st.session_state.new_premium = float(round(st.session_state.current_spot, 2))
-        st.session_state.new_K = 0.0
-    elif inst == "Forward":
-        st.session_state.new_premium = 0.0
-        st.session_state.new_K = float(round(st.session_state.current_spot, 2))
-    else:
-        st.session_state.new_premium = 5.0
-        st.session_state.new_K = float(round(st.session_state.current_spot, 2))
-
-
 def reset_ST_if_needed(s_min, s_max, spot):
     if "ST_eval" not in st.session_state:
         st.session_state.ST_eval = float(round(spot, 4))
@@ -295,9 +282,6 @@ if "last_ticker" not in st.session_state:
 
 if "last_period" not in st.session_state:
     st.session_state.last_period = None
-
-if "last_manual_spot" not in st.session_state:
-    st.session_state.last_manual_spot = None
 
 if "new_instrument" not in st.session_state:
     st.session_state.new_instrument = "Call"
@@ -354,7 +338,6 @@ else:
 
 st.session_state.current_spot = float(spot)
 
-# Resetear estrategia y controles cuando cambie ticker
 if st.session_state.last_ticker is None:
     st.session_state.last_ticker = ticker
     set_builder_defaults_from_spot(spot)
@@ -366,7 +349,6 @@ if st.session_state.last_ticker != ticker:
     st.session_state.ST_eval = float(round(spot, 4))
     st.rerun()
 
-# Si cambia período, no hace falta borrar estrategia, pero sí re-clamp del ST
 if st.session_state.last_period is None:
     st.session_state.last_period = period
 
@@ -501,45 +483,60 @@ with left:
 
     with st.expander("Agregar instrumento", expanded=True):
         with st.form("builder_form", clear_on_submit=False):
-            st.selectbox(
+            instrument_options = ["Call", "Put", "Forward", "Stock"]
+            side_options = ["Long", "Short"]
+
+            current_inst = st.session_state.new_instrument if st.session_state.new_instrument in instrument_options else "Call"
+            current_side = st.session_state.new_side if st.session_state.new_side in side_options else "Long"
+
+            inst_form = st.selectbox(
                 "Instrumento",
-                ["Call", "Put", "Forward", "Stock"],
-                key="new_instrument",
-                on_change=on_instrument_change,
+                instrument_options,
+                index=instrument_options.index(current_inst),
             )
 
-            st.selectbox(
+            side_form = st.selectbox(
                 "Posición",
-                ["Long", "Short"],
-                key="new_side",
+                side_options,
+                index=side_options.index(current_side),
             )
 
-            st.number_input(
+            if inst_form == "Stock":
+                k_default = 0.0
+                premium_default = float(round(spot, 2))
+            elif inst_form == "Forward":
+                k_default = float(round(spot, 2))
+                premium_default = 0.0
+            else:
+                k_default = float(round(st.session_state.new_K, 2))
+                premium_default = float(st.session_state.new_premium)
+
+            K_form = st.number_input(
                 "Strike / Forward",
                 min_value=0.0,
+                value=float(k_default),
                 step=1.0,
-                key="new_K",
             )
 
-            st.number_input(
+            premium_form = st.number_input(
                 "Prima / costo inicial",
                 min_value=0.0,
+                value=float(premium_default),
                 step=1.0,
-                key="new_premium",
             )
 
-            st.number_input(
+            qty_form = st.number_input(
                 "Cantidad",
                 min_value=0.0,
+                value=float(st.session_state.new_qty),
                 step=1.0,
-                key="new_qty",
             )
 
-            st.number_input(
+            multiplier_form = st.number_input(
                 "Multiplicador",
                 min_value=0.0,
+                value=float(st.session_state.new_multiplier),
                 step=1.0,
-                key="new_multiplier",
             )
 
             add_leg = st.form_submit_button("Agregar", use_container_width=True)
@@ -547,16 +544,28 @@ with left:
         if add_leg:
             st.session_state.legs.append(
                 {
-                    "instrument": st.session_state.new_instrument,
-                    "side": st.session_state.new_side,
-                    "K": float(st.session_state.new_K),
-                    "premium": float(st.session_state.new_premium),
-                    "qty": float(st.session_state.new_qty),
-                    "multiplier": float(st.session_state.new_multiplier),
+                    "instrument": inst_form,
+                    "side": side_form,
+                    "K": float(K_form),
+                    "premium": float(premium_form),
+                    "qty": float(qty_form),
+                    "multiplier": float(multiplier_form),
                 }
             )
 
-            set_builder_defaults_from_spot(spot)
+            st.session_state.new_instrument = inst_form
+            st.session_state.new_side = side_form
+
+            if inst_form == "Stock":
+                st.session_state.new_K = 0.0
+                st.session_state.new_premium = float(round(spot, 2))
+            elif inst_form == "Forward":
+                st.session_state.new_K = float(round(spot, 2))
+                st.session_state.new_premium = 0.0
+            else:
+                st.session_state.new_K = float(round(spot, 2))
+                st.session_state.new_premium = 5.0
+
             st.session_state.new_qty = 1.0
             st.session_state.new_multiplier = 1.0
             st.rerun()
@@ -771,7 +780,6 @@ with right:
             )
         )
 
-        # rango y eje y dinámicos
         y_all = []
         if show_total_payoff:
             y_all.extend(total_payoff.tolist())
