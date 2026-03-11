@@ -15,7 +15,6 @@ st.set_page_config(
 )
 
 st.title("Payoff Lab")
-st.caption("Visualizador introductorio de payoffs de derivados")
 
 
 # =========================================================
